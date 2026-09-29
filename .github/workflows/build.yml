@@ -1,10 +1,12 @@
 # PassZen — GitHub Actions CI/CD
 # Automatically builds installers for Windows, macOS, and Linux
-# on every tagged release (e.g., v1.0.0).
+# on every tagged release (e.g., v1.0.0) or manual trigger via GitHub Actions tab.
 #
-# Trigger: Push a git tag matching v*
-#   git tag v1.0.0
-#   git push origin v1.0.0
+# Triggers:
+#   1. Push a git tag matching v*:
+#      git tag v1.0.0
+#      git push origin v1.0.0
+#   2. Manual dispatch: Go to Actions -> Build & Release -> Run workflow
 
 name: Build & Release
 
@@ -12,6 +14,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -34,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pillow
 
       - name: Build executable
         run: python build.py
@@ -44,11 +47,13 @@ jobs:
         with:
           path: installer/windows/passzen_installer.iss
 
-      - name: Upload Windows installer
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: PassZen-Windows
-          path: installer/windows/Output/PassZen-Setup.exe
+          path: |
+            installer/windows/Output/PassZen-Setup.exe
+            dist/PassZen.exe
 
   # ────────────────────────────────────────────────────────────────
   #  macOS Build
@@ -67,14 +72,14 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pillow
 
       - name: Build app bundle
         run: python build.py
 
       - name: Create DMG
         run: |
-          brew install create-dmg
+          brew install create-dmg || true
           create-dmg \
             --volname "PassZen" \
             --window-pos 200 120 \
@@ -113,7 +118,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller pillow
 
       - name: Build executable
         run: python build.py
@@ -126,24 +131,10 @@ jobs:
           cp dist/PassZen PassZen.AppDir/usr/bin/
           cp installer/linux/passzen.desktop PassZen.AppDir/
 
-          # Create a placeholder icon if assets/icon.png doesn't exist
+          # Copy icon
           if [ -f assets/icon.png ]; then
             cp assets/icon.png PassZen.AppDir/passzen.png
             cp assets/icon.png PassZen.AppDir/usr/share/icons/hicolor/256x256/apps/passzen.png
-          else
-            # Generate a minimal placeholder icon
-            python3 -c "
-          import struct, zlib
-          def png(w,h):
-            def chunk(t,d):return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
-            raw=b''
-            for y in range(h):
-              raw+=b'\x00'
-              for x in range(w):raw+=b'\x6c\x63\xff\xff'
-            return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
-          open('PassZen.AppDir/passzen.png','wb').write(png(256,256))
-          "
-            cp PassZen.AppDir/passzen.png PassZen.AppDir/usr/share/icons/hicolor/256x256/apps/passzen.png
           fi
 
           # Create AppRun
@@ -184,24 +175,25 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: PassZen ${{ github.ref_name }}
+          name: PassZen ${{ github.ref_name || 'v1.0.0' }}
+          tag_name: ${{ github.ref_name || 'v1.0.0' }}
           body: |
-            ## 🔐 PassZen ${{ github.ref_name }}
+            ## 🔐 PassZen ${{ github.ref_name || 'v1.0.0' }}
 
             ### Downloads
-            | Platform | File |
-            |----------|------|
-            | Windows | `PassZen-Setup.exe` |
-            | macOS | `PassZen.dmg` |
-            | Linux | `PassZen.AppImage` |
+            | Platform | File | Description |
+            |---|---|---|
+            | **Windows** | `PassZen-Setup.exe` | Setup Wizard (Desktop icon + Start Menu + Uninstaller) |
+            | **Windows** | `PassZen.exe` | Portable Executable (No installation required) |
+            | **macOS** | `PassZen.dmg` | Drag-and-Drop Disk Image |
+            | **Linux** | `PassZen.AppImage` | Universal Linux Package |
 
-            ### Installation
-            - **Windows**: Download and run `PassZen-Setup.exe`
-            - **macOS**: Download `PassZen.dmg`, open it, drag PassZen to Applications
-            - **Linux**: Download `PassZen.AppImage`, run `chmod +x PassZen.AppImage`, then `./PassZen.AppImage`
+            ### Quick Verification
+            - **No Python installation required** for any of these files.
+            - All data is encrypted locally using **AES-256-GCM**.
           files: |
-            release-artifacts/PassZen-Windows/PassZen-Setup.exe
-            release-artifacts/PassZen-macOS/PassZen.dmg
-            release-artifacts/PassZen-Linux/PassZen.AppImage
+            release-artifacts/PassZen-Windows/*
+            release-artifacts/PassZen-macOS/*
+            release-artifacts/PassZen-Linux/*
           draft: false
           prerelease: false
