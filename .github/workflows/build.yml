@@ -1,12 +1,6 @@
 # PassZen — GitHub Actions CI/CD
 # Automatically builds installers for Windows, macOS, and Linux
 # on every tagged release (e.g., v1.0.0) or manual trigger via GitHub Actions tab.
-#
-# Triggers:
-#   1. Push a git tag matching v*:
-#      git tag v1.0.0
-#      git push origin v1.0.0
-#   2. Manual dispatch: Go to Actions -> Build & Release -> Run workflow
 
 name: Build & Release
 
@@ -113,7 +107,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk xvfb
+          sudo apt-get install -y python3-tk xvfb libfuse2 || true
 
       - name: Install Python dependencies
         run: |
@@ -147,24 +141,28 @@ jobs:
           EOF
           chmod +x PassZen.AppDir/AppRun
 
-          # Download appimagetool
+          # Download and extract appimagetool (extract bypasses FUSE requirement in CI)
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract
 
-          # Build AppImage
-          ARCH=x86_64 ./appimagetool-x86_64.AppImage PassZen.AppDir dist/PassZen.AppImage
+          # Build AppImage without needing FUSE
+          ARCH=x86_64 ./squashfs-root/AppRun PassZen.AppDir dist/PassZen.AppImage
 
-      - name: Upload Linux AppImage
+      - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: PassZen-Linux
-          path: dist/PassZen.AppImage
+          path: |
+            dist/PassZen.AppImage
+            dist/PassZen
 
   # ────────────────────────────────────────────────────────────────
   #  Create GitHub Release
   # ────────────────────────────────────────────────────────────────
   release:
     needs: [build-windows, build-macos, build-linux]
+    if: always() && !cancelled() && (needs.build-windows.result == 'success' || needs.build-macos.result == 'success' || needs.build-linux.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -187,9 +185,10 @@ jobs:
             | **Windows** | `PassZen.exe` | Portable Executable (No installation required) |
             | **macOS** | `PassZen.dmg` | Drag-and-Drop Disk Image |
             | **Linux** | `PassZen.AppImage` | Universal Linux Package |
+            | **Linux** | `PassZen` | Standalone Linux Binary |
 
-            ### Quick Verification
-            - **No Python installation required** for any of these files.
+            ### Notes
+            - **Zero Python installation required** to run any of the binaries above.
             - All data is encrypted locally using **AES-256-GCM**.
           files: |
             release-artifacts/PassZen-Windows/*
