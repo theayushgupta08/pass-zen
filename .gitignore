@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# PyInstaller / Build Artifacts
+build/
+dist/
+*.spec
+
+# Inno Setup output
+Output/
+installer/windows/Output/
+
+# PassZen local runtime & test data
+*.db
+*.passzen
+vault_meta.json
+recovery.enc
+settings.json
+
+# IDEs & OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

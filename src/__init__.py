@@ -1,0 +1,1 @@
+# PassZen - Desktop Password Manager

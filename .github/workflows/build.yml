@@ -1,0 +1,207 @@
+# PassZen — GitHub Actions CI/CD
+# Automatically builds installers for Windows, macOS, and Linux
+# on every tagged release (e.g., v1.0.0).
+#
+# Trigger: Push a git tag matching v*
+#   git tag v1.0.0
+#   git push origin v1.0.0
+
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  #  Windows Build
+  # ────────────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Build installer (Inno Setup)
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.4
+        with:
+          path: installer/windows/passzen_installer.iss
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: PassZen-Windows
+          path: installer/windows/Output/PassZen-Setup.exe
+
+  # ────────────────────────────────────────────────────────────────
+  #  macOS Build
+  # ────────────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build app bundle
+        run: python build.py
+
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "PassZen" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "PassZen.app" 175 190 \
+            --app-drop-link 425 190 \
+            "dist/PassZen.dmg" \
+            "dist/PassZen.app" || true
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: PassZen-macOS
+          path: dist/PassZen.dmg
+
+  # ────────────────────────────────────────────────────────────────
+  #  Linux Build
+  # ────────────────────────────────────────────────────────────────
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk xvfb
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: python build.py
+
+      - name: Create AppImage
+        run: |
+          mkdir -p PassZen.AppDir/usr/bin
+          mkdir -p PassZen.AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp dist/PassZen PassZen.AppDir/usr/bin/
+          cp installer/linux/passzen.desktop PassZen.AppDir/
+
+          # Create a placeholder icon if assets/icon.png doesn't exist
+          if [ -f assets/icon.png ]; then
+            cp assets/icon.png PassZen.AppDir/passzen.png
+            cp assets/icon.png PassZen.AppDir/usr/share/icons/hicolor/256x256/apps/passzen.png
+          else
+            # Generate a minimal placeholder icon
+            python3 -c "
+          import struct, zlib
+          def png(w,h):
+            def chunk(t,d):return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
+            raw=b''
+            for y in range(h):
+              raw+=b'\x00'
+              for x in range(w):raw+=b'\x6c\x63\xff\xff'
+            return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw))+chunk(b'IEND',b'')
+          open('PassZen.AppDir/passzen.png','wb').write(png(256,256))
+          "
+            cp PassZen.AppDir/passzen.png PassZen.AppDir/usr/share/icons/hicolor/256x256/apps/passzen.png
+          fi
+
+          # Create AppRun
+          cat > PassZen.AppDir/AppRun << 'EOF'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          export PATH="${HERE}/usr/bin:${PATH}"
+          exec "${HERE}/usr/bin/PassZen" "$@"
+          EOF
+          chmod +x PassZen.AppDir/AppRun
+
+          # Download appimagetool
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+
+          # Build AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage PassZen.AppDir dist/PassZen.AppImage
+
+      - name: Upload Linux AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: PassZen-Linux
+          path: dist/PassZen.AppImage
+
+  # ────────────────────────────────────────────────────────────────
+  #  Create GitHub Release
+  # ────────────────────────────────────────────────────────────────
+  release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PassZen ${{ github.ref_name }}
+          body: |
+            ## 🔐 PassZen ${{ github.ref_name }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows | `PassZen-Setup.exe` |
+            | macOS | `PassZen.dmg` |
+            | Linux | `PassZen.AppImage` |
+
+            ### Installation
+            - **Windows**: Download and run `PassZen-Setup.exe`
+            - **macOS**: Download `PassZen.dmg`, open it, drag PassZen to Applications
+            - **Linux**: Download `PassZen.AppImage`, run `chmod +x PassZen.AppImage`, then `./PassZen.AppImage`
+          files: |
+            release-artifacts/PassZen-Windows/PassZen-Setup.exe
+            release-artifacts/PassZen-macOS/PassZen.dmg
+            release-artifacts/PassZen-Linux/PassZen.AppImage
+          draft: false
+          prerelease: false

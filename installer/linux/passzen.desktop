@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=PassZen
+Comment=Desktop Password Manager
+Exec=PassZen
+Icon=passzen
+Type=Application
+Categories=Utility;Security;
+Terminal=false
+StartupNotify=true
